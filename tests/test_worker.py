@@ -11,7 +11,7 @@ sample_bare_dir = "tests/sample_bare"
 def setup():
     # clean up the local repository, and download a new one
     sh.rm(sample_dir, "-rf")
-    l = worker_from_url(sample_bare_dir, path=sample_dir, worker_name="worker1")
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
     l.git.reset("--hard", "origin/reset")
     l.git.push("-f")
 
@@ -34,7 +34,7 @@ def test_worker_bad_path_git():
 
 @with_setup(setup, teardown)
 def test_worker_print_next_job():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, worker_name="worker1")
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
     jobName = l.take_next_job()
     assert_equal(jobName, "job1.cfg")
@@ -64,7 +64,7 @@ def test_worker_from_url():
 
 @with_setup(setup, teardown)
 def test_write_finished_job():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, worker_name="worker1")
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
     jobName = l.take_next_job()
 
@@ -72,7 +72,7 @@ def test_write_finished_job():
 
 @with_setup(setup, teardown)
 def test_worker_get_job_iterator():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, worker_name="worker1")
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
     iterator = l.get_job_iterator()
     jobs = []
     for k in iterator:
@@ -84,7 +84,7 @@ remote_url = "tests/empty_bare"
 
 def job_runner(workerName):
     worker = worker_from_url(remote_url,
-            path=workerName, worker_name=workerName)
+            path=workerName, name=workerName)
     iterator = worker.get_job_iterator()
     for job in iterator:
         with open(worker.path + "/jobs/" + job, "r+") as f:
@@ -109,7 +109,7 @@ def test_addition():
     # clean up the local repository, and download a new one
     [sh.rm("add%d"%i, "-rf") for i in range(n)]
     sh.rm(base_dir, "-rf")
-    worker = worker_from_url(remote_url, path=base_dir, worker_name="unused")
+    worker = worker_from_url(remote_url, path=base_dir, name="unused")
     worker.git.checkout("master")
     worker.git.reset("--hard", "origin/reset")
     worker.git.push("-f")

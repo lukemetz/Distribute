@@ -1,1 +1,3 @@
 *.pyc
+tests/sample_bare/
+tests/empty_bare/

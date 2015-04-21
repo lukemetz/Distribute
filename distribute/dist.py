@@ -4,23 +4,23 @@ from sh import ErrorReturnCode_1
 from sh import ErrorReturnCode_128
 import platform
 import logging
-logging.basicConfig()
+#logging.basicConfig()
 
-def worker_from_url(url, path="./distribute_state", worker_name=None):
+def worker_from_url(url, path="./distribute_state", name=None):
     """
     Get a worker from the url or path.
     """
     if not os.path.exists(path):
         sh.git.clone(url, path)
-    if worker_name == None:
-        worker_name = platform.node()
-    return Worker(path, worker_name)
+    if name == None:
+        name = platform.node()
+    return Worker(path, name)
 
 class Worker(object):
     def __init__(self, path, name):
         self.path = os.path.abspath(path)
         self.name = name
-        self.git = sh.git.bake(_cwd=self.path)
+        self.git = sh.git.bake(_cwd=self.path, _tty_in=True)
         self.running_job = None
         self.working_branch = None
 
@@ -110,7 +110,8 @@ class Worker(object):
     def get_job_iterator(self):
         while True:
             yield self.take_next_job()
-            self.finish_job()
+            if self.working_branch != None and self.running_job != None:
+                self.finish_job()
 
     def get_result_file(self):
         return open(os.path.join(os.path.join(self.path, "results"), self.running_job), "w+")
@@ -145,7 +146,8 @@ class Worker(object):
     @atomic_change
     def merge_job_branch(self):
         self.git.checkout(self.working_branch)
-        self.git.pull("origin", "master")
+        # TODO this should really be a ff only but doesn't seem to work
+        self.git.pull("--no-edit", "origin", "master")
         self.git.checkout("master")
         self.sync()
         self.git.merge("--no-ff", "--no-edit", self.working_branch)
