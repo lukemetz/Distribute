@@ -4,7 +4,6 @@ from sh import ErrorReturnCode_1
 from sh import ErrorReturnCode_128
 import platform
 import logging
-#logging.basicConfig()
 
 def worker_from_url(url, path="./distribute_state", name=None):
     """
@@ -28,7 +27,6 @@ class Worker(object):
         if self.path != git_top_path:
             raise ValueError("Path provided (%s) is not the root of a git repo"%self.path)
 
-
         super(Worker, self).__init__()
 
     def sync(self):
@@ -48,6 +46,11 @@ class Worker(object):
             raise Exception("Your branch (%s) is not equal to the requested branch (%s)"%(cur_branch, branch))
 
     def atomic_change(func):
+        """
+        Wrapper that ensures a change on the master branch is atomic.
+        This is needed to fix raceconditions when two workers are pushing at the same time
+        """
+
         def atomic_wrapper(self, **kwargs):
             self.git.checkout("master")
             before_sha = self.git("rev-parse", "HEAD").rstrip()
@@ -158,6 +161,9 @@ class Worker(object):
         Merges the working branch into master
         removes job from doing and puts it in done
         """
+
+        if self.running_job is None or self.working_branch is None:
+            raise Exception("Currently not working on a job. Cannot finish nothing.")
         self.merge_job_branch()
         self.write_finished_job()
 
