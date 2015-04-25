@@ -57,6 +57,17 @@ def test_worker_print_next_job():
     assert_equal(last_message, "worker(worker1) took job (job2.cfg)")
 
 @with_setup(setup, teardown)
+def test_worker_take_and_rewrite_job():
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
+
+    jobName = l.take_and_rewrite_jobs(["newJob.cfg"])
+    l.finish_job()
+
+    jobName = l.take_next_job()
+    assert_equal(jobName, "newJob.cfg")
+    l.finish_job()
+
+@with_setup(setup, teardown)
 def test_worker_from_url():
     worker = worker_from_url(sample_bare_dir, path=sample_dir)
 

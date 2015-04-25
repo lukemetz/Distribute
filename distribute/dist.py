@@ -51,7 +51,8 @@ class Worker(object):
         This is needed to fix raceconditions when two workers are pushing at the same time
         """
 
-        def atomic_wrapper(self, **kwargs):
+        def atomic_wrapper(*args, **kwargs):
+            self = args[0]
             self.git.checkout("master")
             before_sha = self.git("rev-parse", "HEAD").rstrip()
             for tries in range(0, 40):
@@ -59,7 +60,7 @@ class Worker(object):
                 self.git.reset("--hard", before_sha)
                 self.sync()
                 try:
-                    ret = func(self, **kwargs)
+                    ret = func(*args, **kwargs)
                     return ret
                 except ErrorReturnCode_1:
                     logging.info("Hit race with 2 workers, rewinding and attempting to fix")
@@ -71,8 +72,7 @@ class Worker(object):
             raise Exception("Could not atomically perform %s", func)
         return atomic_wrapper
 
-    @atomic_change
-    def take_next_job(self):
+    def _get_jobs(self):
         self.ensure_clean()
         self.ensure_branch("master")
         if self.running_job is not None or self.working_branch is not None:
@@ -85,28 +85,68 @@ class Worker(object):
         if todo_contents[0] == "":
             raise StopIteration
 
-        proposed_job = todo_contents[0]
-        new_contents = "\n".join(todo_contents[1:-1])
+        return todo_contents
 
+    def _write_jobs(self, jobs):
+        todo_path = os.path.join(self.path, "jobs.txt")
+
+        new_contents = "\n".join(jobs)
         with open(todo_path, "w+") as todo:
             todo.write(new_contents+"\n")
 
+    def _add_job_to_remaining(self, job):
         running_path = os.path.join(self.path, "running.txt")
+
         with open(running_path, "r+") as running:
             running_contents = running.read()
         with open(running_path, "w+") as running:
-            running.write("%s\n"%proposed_job+ running_contents)
+            running.write("%s\n"%job + running_contents)
+
+    def _branch_for_job(self, job):
+        proposed_branch = "%s/%s"%(self.name, job)
+        self.git.checkout("-b", proposed_branch)
+        self.git.push("-f", "--set-upstream", "origin", proposed_branch)
+        return proposed_branch
+
+    @atomic_change
+    def take_next_job(self):
+        todo_contents = self._get_jobs()
+
+        proposed_job = todo_contents[0]
+        remaining = todo_contents[1:-1]
+        self._write_jobs(remaining)
+
+        self._add_job_to_remaining(proposed_job)
 
         self.commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
 
-        proposed_branch = "%s/%s"%(self.name, proposed_job)
-
-        self.git.checkout("-b", proposed_branch)
-        self.git.push("-f", "--set-upstream", "origin", proposed_branch)
+        proposed_branch = self._branch_for_job(proposed_job)
 
         # only set this when we are sure we have the job
         self.running_job = proposed_job
-        self.working_branch = "%s/%s"%(self.name, proposed_job)
+        self.working_branch = proposed_branch
+
+        return self.running_job
+
+    @atomic_change
+    def take_and_rewrite_jobs(self, next_jobs):
+        """
+        Get and then rewrite the remaining list of jobs to jobs.txt.
+        Great for stuff like hyper parameter optimization.
+        """
+        todo_contents = self._get_jobs()
+        proposed_job = todo_contents[0]
+
+        self._write_jobs(next_jobs)
+        self._add_job_to_remaining(proposed_job)
+
+        self.commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
+
+        proposed_branch = self._branch_for_job(proposed_job)
+
+        # only set this when we are sure we have the job
+        self.running_job = proposed_job
+        self.working_branch = proposed_branch
 
         return self.running_job
 
