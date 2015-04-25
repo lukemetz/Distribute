@@ -12,13 +12,10 @@ def make_next_jobs_func(worker, whetlab_experiment):
         running = worker.get_running()
 
         # don't delete the current propsed job
-        print proposed_job, "proposed job"
         if proposed_job is not None:
             running.append(proposed_job)
 
         not_accounted_for = set(pending_id) - set(running)
-
-        print "Canceling", pending_id, running, not_accounted_for
 
         for res in not_accounted_for:
             whetlab_experiment.cancel_by_result_id(res)
