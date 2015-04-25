@@ -1,6 +1,6 @@
 from nose.tools import raises, assert_equal, with_setup
 import platform
-from distribute.whetlab import make_next_jobs_func
+from distribute.wl import make_next_jobs_func
 
 def test_make_next_jobs_func():
     class Worker_Like():

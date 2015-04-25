@@ -5,6 +5,7 @@ import sh
 import os
 from multiprocessing import Process
 from threading import Thread
+from nose.plugins.attrib import attr
 
 sample_dir = "tests/sample"
 sample_bare_dir = "tests/sample_bare"
@@ -85,8 +86,6 @@ def test_worker_rewrite_jobs_from_func():
     assert_equal(jobName, "newJob2.cfg")
     l.finish_job()
 
-
-
 @with_setup(setup, teardown)
 def test_worker_from_url():
     worker = worker_from_url(sample_bare_dir, path=sample_dir)
@@ -136,6 +135,20 @@ def test_worker_get_job_iterator():
         jobs.append(k)
     assert_equal(jobs, ["job1.cfg", "jobnew.cfg"])
 
+@with_setup(setup, teardown)
+def test_worker_aquire_release_lock():
+    l1 = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
+    l2 = worker_from_url(sample_bare_dir, path=sample_dir, name="worker2")
+    l1.aquire_lock(try_once = True)
+    ret = l2.aquire_lock(try_once = True)
+    assert_equal(ret, False)
+    l1.release_lock(try_once = True)
+
+    ret = l2.aquire_lock(try_once = True)
+    ret = l1.aquire_lock(try_once = True)
+    assert_equal(ret, False)
+    l2.release_lock(try_once = True)
+
 remote_url = "tests/empty_bare"
 #remote_url = "git@github.com:lukemetz/temp_remote.git"
 
@@ -155,7 +168,6 @@ def job_runner(workerName):
 
         print a, b, "=", result
 
-
         result_file = open(os.path.join(\
                 os.path.join(worker.path, "results"), worker.running_job), "w+")
 
@@ -164,6 +176,7 @@ def job_runner(workerName):
 
         worker.commit_changes("Writing result")
 
+@attr(speed='slow')
 def test_addition():
     base_dir = "tests/addition_test"
     n = 2

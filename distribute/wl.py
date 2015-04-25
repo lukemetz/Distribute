@@ -1,4 +1,8 @@
-import whetlab
+"""
+Helpers for use with whetlab
+"""
+
+from whetlab.server.error import ClientError
 
 def make_next_jobs_func(worker, whetlab_experiment):
     """
@@ -18,7 +22,11 @@ def make_next_jobs_func(worker, whetlab_experiment):
         not_accounted_for = set(pending_id) - set(running)
 
         for res in not_accounted_for:
-            whetlab_experiment.cancel_by_result_id(res)
+            try:
+                whetlab_experiment.cancel_by_result_id(res)
+            except ClientError:
+                pass
+
         print "requesting a new job from Whetlab"
         suggest = whetlab_experiment.suggest()
         next_id = suggest._result_id
