@@ -87,6 +87,16 @@ class Worker(object):
 
         return todo_contents
 
+    def get_running(self):
+        self.ensure_clean()
+        self.ensure_branch("master")
+
+        running_path = os.path.join(self.path, "running.txt")
+        with open(running_path, "rwb+") as running:
+            running_contents = running.read().strip().split("\n")
+
+        return [x for x in running_contents if x != ""]
+
     def _write_jobs(self, jobs):
         todo_path = os.path.join(self.path, "jobs.txt")
 
@@ -129,7 +139,7 @@ class Worker(object):
         return self.running_job
 
     @atomic_change
-    def take_and_rewrite_jobs(self, next_jobs):
+    def take_and_rewrite_jobs(self, next_jobs_func):
         """
         Get and then rewrite the remaining list of jobs to jobs.txt.
         Great for stuff like hyper parameter optimization.
@@ -137,6 +147,7 @@ class Worker(object):
         todo_contents = self._get_jobs()
         proposed_job = todo_contents[0]
 
+        next_jobs = next_jobs_func(proposed_job = proposed_job)
         self._write_jobs(next_jobs)
         self._add_job_to_remaining(proposed_job)
 
@@ -156,8 +167,12 @@ class Worker(object):
             if self.working_branch != None and self.running_job != None:
                 self.finish_job()
 
-    def get_result_file(self):
-        return open(os.path.join(os.path.join(self.path, "results"), self.running_job), "w+")
+    def get_job_and_rewrite_iterator(self, make_next_jobs_func):
+        while True:
+            yield self.take_and_rewrite_jobs(make_next_jobs_func)
+            if self.working_branch != None and self.running_job != None:
+                self.finish_job()
+
 
     @atomic_change
     def write_finished_job(self):
@@ -185,6 +200,16 @@ class Worker(object):
 
         self.running_job = None
         self.working_branch = None
+
+    @atomic_change
+    def rewrite_jobs_from_func(self, make_jobs_func):
+        self.ensure_clean()
+        self.ensure_branch("master")
+
+        jobs = make_jobs_func()
+        self._write_jobs(jobs)
+
+        self.commit_changes("worker(%s) rewrote jobs"%self.name)
 
     @atomic_change
     def merge_job_branch(self):

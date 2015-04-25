@@ -60,12 +60,32 @@ def test_worker_print_next_job():
 def test_worker_take_and_rewrite_job():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
-    jobName = l.take_and_rewrite_jobs(["newJob.cfg"])
+    def func(proposed_job=None):
+        return ["newJob.cfg"]
+
+    jobName = l.take_and_rewrite_jobs(func)
     l.finish_job()
 
     jobName = l.take_next_job()
     assert_equal(jobName, "newJob.cfg")
     l.finish_job()
+
+@with_setup(setup, teardown)
+def test_worker_rewrite_jobs_from_func():
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
+    def func(proposed_job=None):
+        return ["badNewJob.cfg"]
+    jobName = l.take_and_rewrite_jobs(func)
+    l.finish_job()
+    def func(proposed_job=None):
+        return ["newJob2.cfg"]
+    l.rewrite_jobs_from_func(func)
+
+    jobName = l.take_next_job()
+    assert_equal(jobName, "newJob2.cfg")
+    l.finish_job()
+
+
 
 @with_setup(setup, teardown)
 def test_worker_from_url():
@@ -82,6 +102,17 @@ def test_write_finished_job():
     l.finish_job()
 
 @with_setup(setup, teardown)
+def test_write_finished_job():
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
+    jobName = l.take_next_job()
+    l.git.checkout("master")
+    assert_equal(len(l.get_running()), 1)
+    assert_equal(l.get_running()[0], "job1.cfg")
+    l.git.checkout(l.working_branch)
+    l.finish_job()
+    assert_equal(len(l.get_running()), 0)
+
+@with_setup(setup, teardown)
 def test_worker_get_job_iterator():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
     iterator = l.get_job_iterator()
@@ -89,6 +120,21 @@ def test_worker_get_job_iterator():
     for k in iterator:
         jobs.append(k)
     assert_equal(jobs, ["job1.cfg", "job2.cfg", "job3.cfg"])
+
+@with_setup(setup, teardown)
+def test_worker_get_job_iterator():
+    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
+    has_ret = {'value': False}
+    def func(proposed_job=None):
+        if has_ret['value']:
+            return []
+        has_ret['value'] = True
+        return ["jobnew.cfg"]
+    iterator = l.get_job_and_rewrite_iterator(func)
+    jobs = []
+    for k in iterator:
+        jobs.append(k)
+    assert_equal(jobs, ["job1.cfg", "jobnew.cfg"])
 
 remote_url = "tests/empty_bare"
 #remote_url = "git@github.com:lukemetz/temp_remote.git"
@@ -109,14 +155,18 @@ def job_runner(workerName):
 
         print a, b, "=", result
 
-        with worker.get_result_file() as f:
+
+        result_file = open(os.path.join(\
+                os.path.join(worker.path, "results"), worker.running_job), "w+")
+
+        with result_file as f:
             f.write("%d\n"%result)
 
         worker.commit_changes("Writing result")
 
 def test_addition():
     base_dir = "tests/addition_test"
-    n = 3
+    n = 2
     # clean up the local repository, and download a new one
     [sh.rm("add%d"%i, "-rf") for i in range(n)]
     sh.rm(base_dir, "-rf")
