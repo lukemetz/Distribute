@@ -114,6 +114,15 @@ class Worker(object):
             time.sleep(10)
             raise WaitingOnLock
 
+    def ensure_free_lock(self):
+        lock_path = os.path.join(self.path, "lock.txt")
+        with open(lock_path, "rb+") as lock:
+            lock_holder = lock.read().strip()
+        if not lock_holder == "":
+            time.sleep(10)
+            raise WaitingOnLock
+
+
     @atomic_change
     def release_lock(self, force_release=False):
         self.ensure_clean()
@@ -177,6 +186,7 @@ class Worker(object):
 
     @atomic_change
     def take_next_job(self):
+        self.ensure_free_lock()
         todo_contents = self._get_jobs()
 
         proposed_job = todo_contents[0]
@@ -257,6 +267,8 @@ class Worker(object):
 
     @atomic_change
     def write_finished_job(self):
+        self.ensure_free_lock()
+
         self.ensure_clean()
         self.ensure_branch("master")
 
