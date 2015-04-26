@@ -15,12 +15,13 @@ def test_make_next_jobs_func():
 
     class Whetlab_Like():
         def __init__(self):
-            self._pending = ["1234", "12345", "not in anything"]
+            self._pending = ["1234", "12345", "11"]
             pass
         def pending(self):
             return [Res(p) for p in self._pending]
         def cancel_by_result_id(self, res_id):
-            self._pending.remove(res_id)
+            self._pending.remove(str(res_id))
+            print "removed", res_id, self._pending
         def suggest(self):
             self._pending.append("1")
             return Res("1")
@@ -29,9 +30,9 @@ def test_make_next_jobs_func():
     experiment = Whetlab_Like()
 
     func = make_next_jobs_func(worker, experiment)
-    val = func(proposed_job="12345")
+    val, next_jobs = func(proposed_job="unused")
 
-    assert_equal(val, ["1"])
-    assert_equal(len(experiment._pending), 3)
-    assert_equal(set(experiment._pending), set(["1", "1234", "12345"]))
+    assert_equal(val, "1")
+    assert_equal(len(experiment._pending), 2)
+    assert_equal(set(experiment._pending), set(["1", "1234"]))
 

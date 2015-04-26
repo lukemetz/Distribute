@@ -3,9 +3,6 @@ from nose.tools import raises, assert_equal, with_setup
 import platform
 import sh
 import os
-from multiprocessing import Process
-from threading import Thread
-from nose.plugins.attrib import attr
 
 sample_dir = "tests/sample"
 sample_bare_dir = "tests/sample_bare"
@@ -58,32 +55,18 @@ def test_worker_print_next_job():
     assert_equal(last_message, "worker(worker1) took job (job2.cfg)")
 
 @with_setup(setup, teardown)
-def test_worker_take_and_rewrite_job():
+def test_worker_take_job_with_modification():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
     def func(proposed_job=None):
-        return ["newJob.cfg"]
+        return "newJob.cfg", ["stateOnJobs"]
 
-    jobName = l.take_and_rewrite_jobs(func)
-    l.finish_job()
-
-    jobName = l.take_next_job()
+    jobName = l.take_job_with_modification(func)
     assert_equal(jobName, "newJob.cfg")
     l.finish_job()
 
-@with_setup(setup, teardown)
-def test_worker_rewrite_jobs_from_func():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
-    def func(proposed_job=None):
-        return ["badNewJob.cfg"]
-    jobName = l.take_and_rewrite_jobs(func)
-    l.finish_job()
-    def func(proposed_job=None):
-        return ["newJob2.cfg"]
-    l.rewrite_jobs_from_func(func)
-
     jobName = l.take_next_job()
-    assert_equal(jobName, "newJob2.cfg")
+    assert_equal(jobName, "stateOnJobs")
     l.finish_job()
 
 @with_setup(setup, teardown)
@@ -121,15 +104,15 @@ def test_worker_get_job_iterator():
     assert_equal(jobs, ["job1.cfg", "job2.cfg", "job3.cfg"])
 
 @with_setup(setup, teardown)
-def test_worker_get_job_iterator():
+def test_worker_get_job_with_modification_iterator():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
     has_ret = {'value': False}
     def func(proposed_job=None):
         if has_ret['value']:
-            return []
+            return "jobnew.cfg", []
         has_ret['value'] = True
-        return ["jobnew.cfg"]
-    iterator = l.get_job_and_rewrite_iterator(func)
+        return "job1.cfg", ["unused"]
+    iterator = l.get_job_with_modification_iterator(func)
     jobs = []
     for k in iterator:
         jobs.append(k)
@@ -148,77 +131,3 @@ def test_worker_aquire_release_lock():
     ret = l1.aquire_lock(try_once = True)
     assert_equal(ret, False)
     l2.release_lock(try_once = True)
-
-remote_url = "tests/empty_bare"
-#remote_url = "git@github.com:lukemetz/temp_remote.git"
-
-def job_runner(workerName):
-    worker = worker_from_url(remote_url,
-            path=workerName, name=workerName)
-    iterator = worker.get_job_iterator()
-    for job in iterator:
-        with open(worker.path + "/jobs/" + job, "r+") as f:
-            job_text = f.read()
-        a,b = [int(x.strip()) for x in job_text.split("+")]
-        result = a+b
-        # The thruput of git is just not that fast,
-        # this sleep is to simulate real computation happening
-        import time
-        time.sleep(5)
-
-        print a, b, "=", result
-
-        result_file = open(os.path.join(\
-                os.path.join(worker.path, "results"), worker.running_job), "w+")
-
-        with result_file as f:
-            f.write("%d\n"%result)
-
-        worker.commit_changes("Writing result")
-
-@attr(speed='slow')
-def test_addition():
-    base_dir = "tests/addition_test"
-    n = 2
-    # clean up the local repository, and download a new one
-    [sh.rm("add%d"%i, "-rf") for i in range(n)]
-    sh.rm(base_dir, "-rf")
-    worker = worker_from_url(remote_url, path=base_dir, name="unused")
-    worker.git.checkout("master")
-    worker.git.reset("--hard", "origin/reset")
-    worker.git.push("-f")
-
-    # make the jobs
-    jobs = []
-    for i in range(2):
-        for j in range(2):
-            jobname = "%d_%d.job"%(i, j)
-            with open(os.path.join(os.path.join(base_dir, "jobs"), jobname), "w+") as job:
-                job.write("%d + %d \n"%(i, j))
-            jobs.append(jobname)
-
-    with open(os.path.join(base_dir, "jobs.txt"), "w+") as jobs_file:
-        jobs_file.write("\n".join(jobs)+"\n")
-
-    worker.commit_changes("Setup jobs")
-
-    # run a simple function over the jobs
-    procs = [Process(target=job_runner, args=("add%d"%i,)) for i in range(n)]
-    [p.start() for p in procs]
-    [p.join() for p in procs]
-
-    worker.git.pull()
-    with open(os.path.join(os.path.join(base_dir, "results"), "1_1.job"), "r+") as job:
-        value = int(job.read().strip())
-    assert_equal(value, 2)
-
-    with open(os.path.join(base_dir, "jobs.txt"), "r+") as jobs:
-        jobs_content = jobs.read().strip()
-    assert_equal(jobs_content, "")
-
-    with open(os.path.join(base_dir, "done.txt"), "r+") as done:
-        done_content = done.read().strip().split("\n")
-    assert_equal(len(done_content), 4)
-
-    [sh.rm("add%d"%i, "-rf") for i in range(n)]
-    sh.rm(base_dir, "-rf")

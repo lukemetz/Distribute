@@ -54,7 +54,7 @@ class Worker(object):
     def atomic_change(func):
         """
         Wrapper that
-    def release_lock(self):ensures a change on the master branch is atomic.
+        ensures a change on the master branch is atomic.
         This is needed to fix raceconditions when two workers are pushing at the same time
         """
 
@@ -73,6 +73,7 @@ class Worker(object):
                 self.git.checkout("master")
                 self.git.reset("--hard", before_sha)
                 self.sync()
+
                 try:
                     ret = func(*args, **kwargs)
                     return ret
@@ -90,11 +91,11 @@ class Worker(object):
                     else:
                         continue
                 except WaitingOnLock:
+                    logging.info("Waiting on lock")
                     if try_once == True:
                         return False
                     else:
                         continue
-
             raise Exception("Could not atomically perform %s", func)
         return atomic_wrapper
 
@@ -108,32 +109,47 @@ class Worker(object):
         if lock_holder == "":
             with open(lock_path, "w+") as lock:
                 lock.write(self.name)
-            self.commit_changes("worker(%s) aquired lock"%self.name)
+            self._commit_changes("worker(%s) aquired lock"%self.name)
         else:
             logging.info("Worker(%s) has the lock. Waiting 10 seconds."%lock_holder)
             time.sleep(10)
             raise WaitingOnLock
 
     def ensure_free_lock(self):
+        self.ensure_branch("master")
+        self.sync()
         lock_path = os.path.join(self.path, "lock.txt")
         with open(lock_path, "rb+") as lock:
             lock_holder = lock.read().strip()
         if not lock_holder == "":
-            time.sleep(10)
+            time.sleep(2)
             raise WaitingOnLock
 
+    def has_lock(self):
+        self.ensure_branch("master")
+        self.sync()
+        lock_path = os.path.join(self.path, "lock.txt")
+        with open(lock_path, "rb+") as lock:
+            lock_holder = lock.read().strip()
+        if lock_holder == self.name:
+            return True
+        else:
+            return False
 
     @atomic_change
     def release_lock(self, force_release=False):
         self.ensure_clean()
         self.ensure_branch("master")
+
         lock_path = os.path.join(self.path, "lock.txt")
         with open(lock_path, "rb+") as lock:
             lock_holder = lock.read().strip()
+
+
         if lock_holder == self.name or force_release:
             with open(lock_path, "w+") as lock:
                 lock.write("")
-            self.commit_changes("worker(%s) released lock"%self.name)
+            self._commit_changes("worker(%s) released lock"%self.name)
         else:
             raise Exception("Worker(%s) does not the lock and force_release is not on.\
                     You should never reach this state."%lock_holder)
@@ -149,6 +165,8 @@ class Worker(object):
             todo_contents = todo.read().split("\n")
 
         if todo_contents[0] == "":
+            if self.has_lock():
+                self.release_lock()
             raise StopIteration
 
         return todo_contents
@@ -195,7 +213,7 @@ class Worker(object):
 
         self._add_job_to_remaining(proposed_job)
 
-        self.commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
+        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
 
         proposed_branch = self._branch_for_job(proposed_job)
 
@@ -218,7 +236,7 @@ class Worker(object):
 
         self._add_job_to_remaining(proposed_job)
 
-        self.commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
+        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
 
         proposed_branch = self._branch_for_job(proposed_job)
 
@@ -228,7 +246,7 @@ class Worker(object):
 
         return self.running_job
 
-    def take_and_rewrite_jobs(self, next_jobs_func):
+    def take_job_with_modification(self, next_jobs_func):
         """
         Get and then rewrite the remaining list of jobs to jobs.txt.
         Great for stuff like hyper parameter optimization.
@@ -238,11 +256,12 @@ class Worker(object):
         todo_contents = self._get_jobs()
         proposed_job = todo_contents[0]
 
-        next_jobs = next_jobs_func(proposed_job = proposed_job)
+        proposed_job, next_jobs = next_jobs_func(proposed_job = proposed_job)
+
         self._write_jobs(next_jobs)
         self._add_job_to_remaining(proposed_job)
 
-        self.commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
+        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
 
         proposed_branch = self._branch_for_job(proposed_job)
 
@@ -259,9 +278,9 @@ class Worker(object):
             if self.working_branch != None and self.running_job != None:
                 self.finish_job()
 
-    def get_job_and_rewrite_iterator(self, make_next_jobs_func):
+    def get_job_with_modification_iterator(self, make_next_jobs_func):
         while True:
-            yield self.take_and_rewrite_jobs(make_next_jobs_func)
+            yield self.take_job_with_modification(make_next_jobs_func)
             if self.working_branch != None and self.running_job != None:
                 self.finish_job()
 
@@ -289,23 +308,10 @@ class Worker(object):
         with open(done_path, "w+") as done:
             done.write("%s\n"%self.running_job + done_contents)
 
-        self.commit_changes("worker(%s) finished job (%s)"%(self.name, self.running_job))
+        self._commit_changes("worker(%s) finished job (%s)"%(self.name, self.running_job))
 
         self.running_job = None
         self.working_branch = None
-
-    def rewrite_jobs_from_func(self, make_jobs_func):
-        self.aquire_lock()
-
-        self.ensure_clean()
-        self.ensure_branch("master")
-
-        jobs = make_jobs_func()
-        self._write_jobs(jobs)
-
-        self.commit_changes("worker(%s) rewrote jobs"%self.name)
-
-        self.release_lock()
 
     @atomic_change
     def merge_job_branch(self):
@@ -328,7 +334,11 @@ class Worker(object):
         self.merge_job_branch()
         self.write_finished_job()
 
-    def commit_changes(self, message):
+    def commit_update(self, message):
+        self.git.checkout(self.working_branch)
+        self._commit_changes(message)
+
+    def _commit_changes(self, message):
         """
         Attempt to commit and push the current changes.
         If there was an error, sh will raise ErrorReturnCode_1
