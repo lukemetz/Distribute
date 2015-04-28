@@ -1,8 +1,8 @@
 from nose.tools import raises, assert_equal, with_setup
 import platform
-from distribute.wl import make_next_jobs_func
+from distribute.wl import whetlab_make_next_jobs_func
 
-def test_make_next_jobs_func():
+def test_whetlab_make_next_jobs_func():
     class Worker_Like():
         def __init__(self):
             pass
@@ -28,7 +28,7 @@ def test_make_next_jobs_func():
     worker = Worker_Like()
     experiment = Whetlab_Like()
 
-    func = make_next_jobs_func(worker, experiment)
+    func = whetlab_make_next_jobs_func(worker, experiment)
     val = func()
 
     assert_equal(val, "1")

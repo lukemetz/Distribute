@@ -4,7 +4,7 @@ Helpers for use with whetlab
 
 from whetlab.server.error import ClientError
 
-def make_next_jobs_func(worker, whetlab_experiment):
+def whetlab_make_next_jobs_func(worker, whetlab_experiment):
     """
     Function to generate a rewrite function for distribute.
     Ensures all active jobs on whetlab are running, deletes the others, then sugjests a new job

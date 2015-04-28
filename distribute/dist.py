@@ -235,6 +235,7 @@ class Worker(object):
 
     def commit_update(self, message):
         assert self.working_branch != None
+
         self.git.checkout(self.working_branch)
         self._commit_changes(message)
 
