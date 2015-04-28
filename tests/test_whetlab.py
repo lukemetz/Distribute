@@ -21,7 +21,6 @@ def test_make_next_jobs_func():
             return [Res(p) for p in self._pending]
         def cancel_by_result_id(self, res_id):
             self._pending.remove(str(res_id))
-            print "removed", res_id, self._pending
         def suggest(self):
             self._pending.append("1")
             return Res("1")
@@ -30,7 +29,7 @@ def test_make_next_jobs_func():
     experiment = Whetlab_Like()
 
     func = make_next_jobs_func(worker, experiment)
-    val, next_jobs = func(proposed_job="unused")
+    val = func()
 
     assert_equal(val, "1")
     assert_equal(len(experiment._pending), 2)

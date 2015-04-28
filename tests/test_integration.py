@@ -22,16 +22,28 @@ def teardown():
     [sh.rm("add%d"%i, "-rf") for i in range(n)]
     sh.rm(base_dir, "-rf")
 
-
-
 remote_url = "tests/empty_bare"
 #remote_url = "git@github.com:lukemetz/temp_remote.git"
+
+def next_job_func():
+    with open(os.path.join(base_dir, "jobs.txt"), "r+") as jobs_file:
+        jobs = jobs_file.read().strip().split("\n")
+        if jobs[0] == "":
+            return None
+        next_job = jobs[0]
+        remaining_jobs = jobs[1:]
+    with open(os.path.join(base_dir, "jobs.txt"), "w+") as jobs_file:
+        jobs_file.write("\n".join(remaining_jobs)+"\n")
+
+    return next_job
 
 def job_runner(workerName):
     worker = worker_from_url(remote_url,
             path=workerName, name=workerName)
-    iterator = worker.get_job_iterator()
-    for job in iterator:
+    while True:
+        job = worker.get_next_job(next_job_func)
+        if job == None:
+            return
         with open(worker.path + "/jobs/" + job, "r+") as f:
             job_text = f.read()
         a,b = [int(x.strip()) for x in job_text.split("+")]
@@ -50,6 +62,8 @@ def job_runner(workerName):
             f.write("%d\n"%result)
 
         worker.commit_update("Writing result")
+
+        worker.finish_job()
 
 @attr(speed='slow')
 @with_setup(setup, teardown)
@@ -87,23 +101,20 @@ def test_addition():
         done_content = done.read().strip().split("\n")
     assert_equal(len(done_content), 4)
 
-
-def modification_func(proposed_job):
-    modified_job= ''.join(['1' for x in range(int(proposed_job))])
-    remaining = int(proposed_job) - 1
-    if remaining < 1:
-        remaining = ""
+jobs = ["1", "11", "111", "1111"]
+def modification_func():
+    if len(jobs) > 0:
+        return jobs.pop()
     else:
-        remaining = str(remaining)
-    print modified_job, remaining
-
-    return modified_job, remaining
+        return None
 
 def job_runner_modification(workerName):
     worker = worker_from_url(remote_url,
             path=workerName, name=workerName)
-    iterator = worker.get_job_with_modification_iterator(modification_func)
-    for job in iterator:
+    for i in range(0,4):
+        job = worker.get_next_job(modification_func)
+        if job == None:
+            return
         print "got a job", job, worker.name
         # The thruput of git is just not that fast,
         # this sleep is to simulate real computation happening)
@@ -114,11 +125,14 @@ def job_runner_modification(workerName):
 
         result_file = open(os.path.join(\
                 os.path.join(worker.path, "results"), worker.running_job+".job"), "w+")
+        print result_file
 
         with result_file as f:
             f.write("%d\n"%result)
 
         worker.commit_update("Writing result")
+
+        worker.finish_job()
 
 
 @attr(speed='slow')
@@ -143,11 +157,6 @@ def test_addition_modification():
         value = int(job.read().strip())
     assert_equal(value, 12)
 
-    with open(os.path.join(base_dir, "jobs.txt"), "r+") as jobs:
-        jobs_content = jobs.read().strip()
-    assert_equal(jobs_content, "")
-
     with open(os.path.join(base_dir, "done.txt"), "r+") as done:
         done_content = done.read().strip().split("\n")
     assert_equal(len(done_content), 4)
-

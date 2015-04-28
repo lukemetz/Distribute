@@ -34,39 +34,35 @@ def test_worker_bad_path_git():
 def test_worker_print_next_job():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
-    jobName = l.take_next_job()
+    jobName = l.get_next_job(lambda: "job1.cfg")
     assert_equal(jobName, "job1.cfg")
 
     running_contents = open(os.path.join(sample_dir, "running.txt"), "r+").read()
     assert_equal(running_contents.split("\n")[0], "job1.cfg")
 
-    last_message = l.git("rev-list", "HEAD", "-1", "--format=%s").split("\n")[1]
-    assert_equal(last_message, "worker(worker1) took job (job1.cfg)")
+    last_message = l.git("rev-list", "HEAD^", "-1", "--format=%s").split("\n")[1]
+    assert_equal(last_message, "worker(worker1) started job (job1.cfg)")
 
     l.finish_job()
 
-    jobName = l.take_next_job()
+    jobName = l.get_next_job(lambda: "job2.cfg")
     assert_equal(jobName, "job2.cfg")
 
     running_contents = open(os.path.join(sample_dir, "running.txt"), "r+").read()
     assert_equal(running_contents.split("\n")[0], "job2.cfg")
 
-    last_message = l.git("rev-list", "HEAD", "-1", "--format=%s").split("\n")[1]
-    assert_equal(last_message, "worker(worker1) took job (job2.cfg)")
+    last_message = l.git("rev-list", "HEAD^", "-1", "--format=%s").split("\n")[1]
+    assert_equal(last_message, "worker(worker1) started job (job2.cfg)")
 
 @with_setup(setup, teardown)
-def test_worker_take_job_with_modification():
+def test_worker_get_next_job():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
-    def func(proposed_job=None):
-        return "newJob.cfg", ["stateOnJobs"]
+    def func():
+        return "newJob.cfg"
 
-    jobName = l.take_job_with_modification(func)
+    jobName = l.get_next_job(func)
     assert_equal(jobName, "newJob.cfg")
-    l.finish_job()
-
-    jobName = l.take_next_job()
-    assert_equal(jobName, "stateOnJobs")
     l.finish_job()
 
 @with_setup(setup, teardown)
@@ -79,44 +75,16 @@ def test_worker_from_url():
 def test_write_finished_job():
     l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
 
-    jobName = l.take_next_job()
+    def func():
+        return "job1.cfg"
 
-    l.finish_job()
-
-@with_setup(setup, teardown)
-def test_write_finished_job():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
-    jobName = l.take_next_job()
+    jobName = l.get_next_job(func)
     l.git.checkout("master")
     assert_equal(len(l.get_running()), 1)
     assert_equal(l.get_running()[0], "job1.cfg")
     l.git.checkout(l.working_branch)
     l.finish_job()
     assert_equal(len(l.get_running()), 0)
-
-@with_setup(setup, teardown)
-def test_worker_get_job_iterator():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
-    iterator = l.get_job_iterator()
-    jobs = []
-    for k in iterator:
-        jobs.append(k)
-    assert_equal(jobs, ["job1.cfg", "job2.cfg", "job3.cfg"])
-
-@with_setup(setup, teardown)
-def test_worker_get_job_with_modification_iterator():
-    l = worker_from_url(sample_bare_dir, path=sample_dir, name="worker1")
-    has_ret = {'value': False}
-    def func(proposed_job=None):
-        if has_ret['value']:
-            return "jobnew.cfg", []
-        has_ret['value'] = True
-        return "job1.cfg", ["unused"]
-    iterator = l.get_job_with_modification_iterator(func)
-    jobs = []
-    for k in iterator:
-        jobs.append(k)
-    assert_equal(jobs, ["job1.cfg", "jobnew.cfg"])
 
 @with_setup(setup, teardown)
 def test_worker_aquire_release_lock():

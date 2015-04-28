@@ -53,11 +53,9 @@ class Worker(object):
 
     def atomic_change(func):
         """
-        Wrapper that
-        ensures a change on the master branch is atomic.
+        Wrapper that ensures a change on the master branch is atomic.
         This is needed to fix raceconditions when two workers are pushing at the same time
         """
-
         def atomic_wrapper(*args, **kwargs):
             self = args[0]
             self.git.checkout("master")
@@ -78,24 +76,18 @@ class Worker(object):
                 try:
                     ret = func(*args, **kwargs)
                     return ret
-                except ErrorReturnCode_1:
-                    logging.info("Hit race with 2 workers, rewinding and attempting to fix")
-                    if try_once == True:
-                        return False
-                    else:
-                        continue
-                except ErrorReturnCode_128:
-                    logging.info("Hit race with 2 workers, rewinding and attempting to fix")
-
+                except (ErrorReturnCode_1, ErrorReturnCode_128) as e:
+                    logging.info("Hit race with 2 workers, rewinding and attem")
                     if try_once == True:
                         return False
                     else:
                         continue
                 except WaitingOnLock:
-                    logging.info("Waiting on lock")
+                    logging.info("Waiting 10 seconds for lock.")
                     if try_once == True:
                         return False
                     else:
+                        time.sleep(10)
                         continue
             raise Exception("Could not atomically perform %s", func)
         return atomic_wrapper
@@ -112,8 +104,6 @@ class Worker(object):
                 lock.write(self.name)
             self._commit_changes("worker(%s) aquired lock"%self.name)
         else:
-            logging.info("Worker(%s) has the lock. Waiting 10 seconds."%lock_holder)
-            time.sleep(10)
             raise WaitingOnLock
 
     def ensure_free_lock(self):
@@ -123,7 +113,6 @@ class Worker(object):
         with open(lock_path, "rb+") as lock:
             lock_holder = lock.read().strip()
         if not lock_holder == "":
-            time.sleep(2)
             raise WaitingOnLock
 
     def has_lock(self):
@@ -132,10 +121,7 @@ class Worker(object):
         lock_path = os.path.join(self.path, "lock.txt")
         with open(lock_path, "rb+") as lock:
             lock_holder = lock.read().strip()
-        if lock_holder == self.name:
-            return True
-        else:
-            return False
+        return lock_holder == self.name
 
     @atomic_change
     def release_lock(self, force_release=False):
@@ -155,23 +141,6 @@ class Worker(object):
             raise Exception("Worker(%s) does not the lock and force_release is not on.\
                     You should never reach this state."%lock_holder)
 
-    def _get_jobs(self):
-        self.ensure_clean()
-        self.ensure_branch("master")
-        if self.running_job is not None or self.working_branch is not None:
-            raise Exception("Currently working on a job, cannot start another")
-
-        todo_path = os.path.join(self.path, "jobs.txt")
-        with open(todo_path, "rwb+") as todo:
-            todo_contents = todo.read().split("\n")
-
-        if todo_contents[0] == "":
-            if self.has_lock():
-                self.release_lock()
-            raise StopIteration
-
-        return todo_contents
-
     def get_running(self):
         self.ensure_clean()
         self.ensure_branch("master")
@@ -182,14 +151,7 @@ class Worker(object):
 
         return [x for x in running_contents if x != ""]
 
-    def _write_jobs(self, jobs):
-        todo_path = os.path.join(self.path, "jobs.txt")
-
-        new_contents = "\n".join(jobs)
-        with open(todo_path, "w+") as todo:
-            todo.write(new_contents+"\n")
-
-    def _add_job_to_remaining(self, job):
+    def _add_job_to_running(self, job):
         running_path = os.path.join(self.path, "running.txt")
 
         with open(running_path, "r+") as running:
@@ -203,87 +165,24 @@ class Worker(object):
         self.git.push("-f", "--set-upstream", "origin", proposed_branch)
         return proposed_branch
 
-    @atomic_change
-    def take_next_job(self):
-        self.ensure_free_lock()
-        todo_contents = self._get_jobs()
-
-        proposed_job = todo_contents[0]
-        remaining = todo_contents[1:-1]
-        self._write_jobs(remaining)
-
-        self._add_job_to_remaining(proposed_job)
-
-        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
-
-        proposed_branch = self._branch_for_job(proposed_job)
-
-        # only set this when we are sure we have the job
-        self.running_job = proposed_job
-        self.working_branch = proposed_branch
-
-        return self.running_job
-
-    @atomic_change
-    def peak_next_job(self):
+    def get_next_job(self, next_job_func):
         """
-        Like take_next_job but don't update the jobs file
-        Useful for debugging
+        get the next job in an atomic way.
+        next_job_func gets run atomically.
         """
-        todo_contents = self._get_jobs()
-
-        proposed_job = todo_contents[0]
-        remaining = todo_contents[1:-1]
-
-        self._add_job_to_remaining(proposed_job)
-
-        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
-
-        proposed_branch = self._branch_for_job(proposed_job)
-
-        # only set this when we are sure we have the job
-        self.running_job = proposed_job
-        self.working_branch = proposed_branch
-
-        return self.running_job
-
-    def take_job_with_modification(self, next_jobs_func):
-        """
-        Get and then rewrite the remaining list of jobs to jobs.txt.
-        Great for stuff like hyper parameter optimization.
-        """
+        if self.working_branch is not None and self.running_job is not None:
+            raise Exception("Already running a job")
         self.aquire_lock()
 
-        todo_contents = self._get_jobs()
-        proposed_job = todo_contents[0]
-
-        proposed_job, next_jobs = next_jobs_func(proposed_job = proposed_job)
-
-        self._write_jobs(next_jobs)
-        self._add_job_to_remaining(proposed_job)
-
-        self._commit_changes("worker(%s) took job (%s)"%(self.name, proposed_job))
-
-        proposed_branch = self._branch_for_job(proposed_job)
-
-        # only set this when we are sure we have the job
-        self.running_job = proposed_job
-        self.working_branch = proposed_branch
+        self.running_job = next_job_func()
+        if self.running_job is not None:
+            self._add_job_to_running(self.running_job)
+            self._commit_changes("worker(%s) started job (%s)"%(self.name, self.running_job))
+            self.working_branch = self._branch_for_job(self.running_job)
 
         self.release_lock()
+
         return self.running_job
-
-    def get_job_iterator(self):
-        while True:
-            yield self.take_next_job()
-            if self.working_branch != None and self.running_job != None:
-                self.finish_job()
-
-    def get_job_with_modification_iterator(self, make_next_jobs_func):
-        while True:
-            yield self.take_job_with_modification(make_next_jobs_func)
-            if self.working_branch != None and self.running_job != None:
-                self.finish_job()
 
     @atomic_change
     def write_finished_job(self):
