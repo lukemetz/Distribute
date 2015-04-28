@@ -61,6 +61,7 @@ class Worker(object):
         def atomic_wrapper(*args, **kwargs):
             self = args[0]
             self.git.checkout("master")
+            self.sync()
             before_sha = self.git("rev-parse", "HEAD").rstrip()
 
             if "try_once" in kwargs and kwargs["try_once"] == True:
@@ -315,6 +316,7 @@ class Worker(object):
 
     @atomic_change
     def merge_job_branch(self):
+        self.ensure_free_lock()
         self.git.checkout(self.working_branch)
         # TODO this should really be a ff only but doesn't seem to work
         self.git.pull("--no-edit", "origin", "master")
@@ -335,6 +337,7 @@ class Worker(object):
         self.write_finished_job()
 
     def commit_update(self, message):
+        assert self.working_branch != None
         self.git.checkout(self.working_branch)
         self._commit_changes(message)
 
