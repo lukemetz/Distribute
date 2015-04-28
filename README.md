@@ -11,7 +11,7 @@ from distribute.dist import Worker, worker_from_url
 from distribute import whetlab_make_next_jobs_func
 
 if __name__ == "__main__":
-    #Distribute uses a git remote for both synchronization and a shared data store.
+    #Distribute uses a git remote for both synchronization and a shared data store. This remote must have a done.txt file and a running.txt file. These files keep track of done jobs and running jobs.
     remote_url = "git@github.com:example/example_remote.git"
     # A worker is the object that manges and interacts with the git remote in a synchronized way.
     # There can be multiple workers working on the same remote, but only one worker per local copy.
