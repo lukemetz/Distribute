@@ -132,7 +132,6 @@ class Worker(object):
         with open(lock_path, "rb+") as lock:
             lock_holder = lock.read().strip()
 
-
         if lock_holder == self.name or force_release:
             with open(lock_path, "w+") as lock:
                 lock.write("")
@@ -184,10 +183,7 @@ class Worker(object):
 
         return self.running_job
 
-    @atomic_change
     def write_finished_job(self):
-        self.ensure_free_lock()
-
         self.ensure_clean()
         self.ensure_branch("master")
 
@@ -213,9 +209,7 @@ class Worker(object):
         self.running_job = None
         self.working_branch = None
 
-    @atomic_change
     def merge_job_branch(self):
-        self.ensure_free_lock()
         self.git.checkout(self.working_branch)
         # TODO this should really be a ff only but doesn't seem to work
         self.git.pull("--no-edit", "origin", "master")
@@ -232,8 +226,12 @@ class Worker(object):
 
         if self.running_job is None or self.working_branch is None:
             raise Exception("Currently not working on a job. Cannot finish nothing.")
+        self.aquire_lock()
+
         self.merge_job_branch()
         self.write_finished_job()
+
+        self.release_lock()
 
     def commit_update(self, message):
         assert self.working_branch != None
@@ -246,5 +244,11 @@ class Worker(object):
         If there was an error, sh will raise ErrorReturnCode_1
         """
         self.git.add(".")
+
+        status = self.git.status("--porcelain")
+        # all clean, so don't bother commiting
+        if len(status) == 0:
+            return
+
         self.git.commit("-m", message)
         self.git.push()
